@@ -201,6 +201,8 @@ void Inlet1D::eval(size_t jg, double* xg, double* rg,
             }
         }
 
+        //dol; assume zero soot inlet, so no modification to flow domain needed
+
     } else {
         // right inlet
         // Array elements corresponding to the last point in the flow domain
@@ -371,7 +373,7 @@ void Outlet1D::eval(size_t jg, double* xg, double* rg, integer* diagg,
         if (m_flow_right->doEnergy(0)) {
             rb[c_offset_T] = xb[c_offset_T] - xb[c_offset_T + nc];
         }
-        for (size_t k = c_offset_Y; k < nc; k++) {
+        for (size_t k = c_offset_Y; k < nc; k++) {       //dol does soot too if it is there
             rb[k] = xb[k] - xb[k + nc];
         }
     }
@@ -391,7 +393,7 @@ void Outlet1D::eval(size_t jg, double* xg, double* rg, integer* diagg,
             rb[c_offset_T] = xb[c_offset_T] - xb[c_offset_T - nc]; // zero T gradient
         }
         size_t kSkip = c_offset_Y + m_flow_left->rightExcessSpecies();
-        for (size_t k = c_offset_Y; k < nc; k++) {
+        for (size_t k = c_offset_Y; k < nc; k++) {       //dol does soot too if it is there           
             if (k != kSkip) {
                 rb[k] = xb[k] - xb[k - nc]; // zero mass fraction gradient
                 db[k] = 0;

@@ -16,8 +16,9 @@ using namespace std;
 namespace Cantera
 {
 
-StFlow::StFlow(ThermoPhase* ph, size_t nsp, size_t points) :
-    Domain1D(nsp+c_offset_Y, points),
+StFlow::StFlow(ThermoPhase* ph, size_t nsp, size_t points, 
+               size_t nsoot, soot::sootModel sootM, soot::state sootS) : //dol
+    Domain1D(nsp+c_offset_Y+nsoot, points),                              //dol
     m_press(-1.0),
     m_nsp(nsp),
     m_thermo(0),
@@ -31,7 +32,10 @@ StFlow::StFlow(ThermoPhase* ph, size_t nsp, size_t points) :
     m_kExcessLeft(0),
     m_kExcessRight(0),
     m_zfixed(Undef),
-    m_tfixed(-1.)
+    m_tfixed(-1.),
+    m_nsoot(nsoot),                                 //dol
+    m_sootModel(sootM),                             //dol
+    m_sootState(sootS)                              //dol
 {
     if (ph->type() == "IdealGas") {
         m_thermo = static_cast<IdealGasPhase*>(ph);
@@ -49,8 +53,11 @@ StFlow::StFlow(ThermoPhase* ph, size_t nsp, size_t points) :
     size_t nsp2 = m_thermo->nSpecies();
     if (nsp2 != m_nsp) {
         m_nsp = nsp2;
-        Domain1D::resize(m_nsp+c_offset_Y, points);
+        Domain1D::resize(m_nsp+m_nsoot+c_offset_Y, points); //dol
     }
+
+    if(m_nsoot > 0)                                 //dol
+        sootS = soot::state(m_nsoot);
 
     // make a local copy of the species molecular weight vector
     m_wt = m_thermo->molecularWeights();
@@ -61,7 +68,7 @@ StFlow::StFlow(ThermoPhase* ph, size_t nsp, size_t points) :
     // the species mass fractions are the last components in the solution
     // vector, so the total number of components is the number of species
     // plus the offset of the first mass fraction.
-    m_nv = c_offset_Y + m_nsp;
+    m_nv = c_offset_Y + m_nsp + m_nsoot;    //dol
 
     // enable all species equations by default
     m_do_species.resize(m_nsp, true);
@@ -72,7 +79,10 @@ StFlow::StFlow(ThermoPhase* ph, size_t nsp, size_t points) :
     m_diff.resize(m_nsp*m_points);
     m_multidiff.resize(m_nsp*m_nsp*m_points);
     m_flux.resize(m_nsp,m_points);
+    m_Sflux.resize(m_nsoot,m_points);              //dol
     m_wdot.resize(m_nsp,m_points, 0.0);
+    m_Sdot.resize(m_nsoot,m_points, 0.0);          //dol
+    m_vstherm.resize(m_points, 0.0);              //dol
     m_ybar.resize(m_nsp);
     m_qdotRadiation.resize(m_points, 0.0);
 
@@ -86,6 +96,13 @@ StFlow::StFlow(ThermoPhase* ph, size_t nsp, size_t points) :
     // mass fraction bounds
     for (size_t k = 0; k < m_nsp; k++) {
         setBounds(c_offset_Y+k, -1.0e-7, 1.0e5);
+    }
+
+    // soot
+    if(m_nsoot > 0) { //dol
+        for (size_t k = 0; k < m_nsoot; k++) {
+            setBounds(c_offset_Y+ m_nsp + k, -1.0e-7, 1.0e100);  //dol
+        }
     }
 
     //-------------------- grid refinement -------------------------
@@ -137,14 +154,19 @@ void StFlow::resize(size_t ncomponents, size_t points)
     m_visc.resize(m_points, 0.0);
     m_tcon.resize(m_points, 0.0);
 
+    m_vstherm.resize(m_points, 0.0);           //dol
+
     m_diff.resize(m_nsp*m_points);
     if (m_do_multicomponent) {
         m_multidiff.resize(m_nsp*m_nsp*m_points);
         m_dthermal.resize(m_nsp, m_points, 0.0);
     }
     m_flux.resize(m_nsp,m_points);
+    m_Sflux.resize(m_nsoot,m_points);            //dol
     m_wdot.resize(m_nsp,m_points, 0.0);
+    m_Sdot.resize(m_nsoot,m_points, 0.0);        //dol
     m_do_energy.resize(m_points,false);
+    m_SGdot.resize((int)soot::gasSp::size,m_points, 0.0);        //dol
     m_qdotRadiation.resize(m_points, 0.0);
     m_fixedtemp.resize(m_points);
 
@@ -208,6 +230,9 @@ void StFlow::setTransport(Transport& trans)
         m_multidiff.resize(m_nsp*m_nsp*m_points);
         m_dthermal.resize(m_nsp, m_points, 0.0);
     }
+
+    if(m_nsoot > 0)
+        m_vstherm.resize(m_points);  //dol
 }
 
 void StFlow::_getInitialSoln(double* x)
@@ -337,6 +362,88 @@ void StFlow::updateProperties(size_t jg, double* x, size_t jmin, size_t jmax)
     updateDiffFluxes(x, j0, j1);
 }
 
+void StFlow::getSdot(doublereal *x, size_t j) {     //dol
+
+    //--------- hardcoded, corresponds to sootlib: nuc: LIN; oxid: LL; coag: FM; growth: LIN; {{{
+    //--------- verified identical to sootlib
+
+    // setGas(x,j);
+
+    // double Mhat0scale = 1E16;
+    // double Mhat1scale = 0.01;
+
+    // double rhosoot    = 1850;       // kg_soot/m3_soot
+    // double Cmin       = 100;        // # carbon atoms per nucleated soot particle
+    // double Wc         = 12.011;     // MW of carbon kg/kmol
+    // double mmin       = 2E-26;      // min allowed soot diameter 0.1 nm ~ diameter of one carbon atom)
+
+    // double C2H2  = m_thermo->concentration(m_thermo->speciesIndex("C2H2"));  // kmol/m3
+    // double O2    = m_thermo->concentration(m_thermo->speciesIndex("O2"));    // kmol/m3
+
+    // double n     = abs( S(x,0,j) * m_thermo->density() * Mhat0scale );       // #/m3
+    // if(n < 1E6) n = 1E6;
+    // double rhoYs = abs( S(x,1,j) * m_thermo->density() * Mhat1scale );       // kg/m3
+
+    // double m = rhoYs/n;
+    // double mr = m*m/(m+m);
+    // double dp = pow(6.*m/(M_PI*rhosoot), 1./3.);                 // soot particle diameter
+    // double ds = dp+dp;
+
+    // double Rcoa = m<=mmin ? 0.0 : 2.2*sqrt(M_PI*Boltzmann*T(x,j)*0.5/mr)*ds*ds*n*n; // coagulation: kmolsoot/m3*s           
+
+    // double Rnuc = 0.63E4*exp(-21100./T(x,j))*C2H2;                     // nucleation: kmol_C2H2/m3*s
+
+    // double A    = M_PI*dp*dp * n;                                      // m2soot/m3
+    // double Rgrw = 750.*exp(-12100/T(x,j)) * C2H2 * A;                  // growth: kmol_C2H2/m3*s
+
+    // double Roxi = 0.1E5*sqrt(T(x,j))*exp(-19680./T(x,j)) * O2 * A;     // oxid: kmol/m3*s
+
+    // double M0dot = (Rnuc*2./Cmin*Avogadro - Rcoa)     / Mhat0scale;
+    // double M1dot = (Rnuc + Rgrw - 0.5*Roxi) * 2.*Wc   / Mhat1scale;
+
+    // m_Sdot(0, j) = M0dot;
+    // m_Sdot(1, j) = M1dot;}}}
+
+    //------------------------------------------------------------------------------
+
+    setGas(x,j);
+
+    //----------- get soot moments from solver
+
+    vector<double> sootVar(m_nsoot);
+    for(size_t k=0; k<m_nsoot; k++)
+        sootVar[k] = abs( S(x,k,j) * m_thermo->density() * m_sootState.sootScales[k] );     // moments: #/m3, kg/m3, etc.
+    if(sootVar[0] < 1E6) sootVar[0] = 1E6;
+
+    //----------- set soot model state (gas and soot)
+
+    vector<double> yGas = {m_thermo->massFraction(m_thermo->speciesIndex("H")),
+                           m_thermo->massFraction(m_thermo->speciesIndex("H2")),
+                           m_thermo->massFraction(m_thermo->speciesIndex("O")),
+                           m_thermo->massFraction(m_thermo->speciesIndex("O2")),
+                           m_thermo->massFraction(m_thermo->speciesIndex("OH")),
+                           m_thermo->massFraction(m_thermo->speciesIndex("H2O")),
+                           m_thermo->massFraction(m_thermo->speciesIndex("CO")),
+                           m_thermo->massFraction(m_thermo->speciesIndex("C2H2")),
+                           0.0, 0.0};
+    vector<double> yPAH(6,0.0);  // PAH species mass fractions [C10H8, C12H8, C12H10, C14H10, C16H10, C18H10]
+
+    m_sootState.setState(T(x,j), m_press, m_rho[j], m_visc[j], m_wtm[j], yGas, yPAH, sootVar, m_nsoot);  // thermostate
+
+    //----------- soot source terms
+
+    m_sootModel.setSourceTerms(m_sootState);
+
+    //----------- set cantera soot sources using soot model
+
+    for(size_t k=0; k<m_nsoot; k++)
+        m_Sdot(k,j) = m_sootModel.sourceTerms->sootSourceTerms[k] / m_sootState.sootScales[k];
+
+    for(size_t k=0; k<(int)soot::gasSp::size; k++)
+        m_SGdot(k,j) = m_sootModel.sourceTerms->gasSourceTerms[k];
+
+}
+
 void StFlow::evalResidual(double* x, double* rsd, int* diag,
                           double rdt, size_t jmin, size_t jmax)
 {
@@ -449,6 +556,13 @@ void StFlow::evalResidual(double* x, double* rsd, int* diag,
 
             // set residual of poisson's equ to zero
             rsd[index(c_offset_E, 0)] = x[index(c_offset_E, j)];
+
+            if(m_nsoot > 0) {         //dol
+                for (size_t k = 0; k < m_nsoot; k++) {
+                    rsd[index(c_offset_Y + m_nsp + k, 0)] = -(m_Sflux(k,0) + rho_u(x,0)*S(x,k,0));
+                }
+            }
+
         } else if (j == m_points - 1) {
             evalRightBoundary(x, rsd, diag, rdt);
             // set residual of poisson's equ to zero
@@ -486,6 +600,35 @@ void StFlow::evalResidual(double* x, double* rsd, int* diag,
                    - convec - diffus)/m_rho[j]
                   - rdt*(Y(x,k,j) - Y_prev(k,j));
                 diag[index(c_offset_Y + k, j)] = 1;
+            }
+
+            //-------------------------------------------------
+            //    Soot equations      //dol
+            //
+            //    \rho d\hat{S}_k/dt + \rho (u+u_t) d\hat{S}_k/dz = \dot{S}_k
+            //    For moments:  \hat{S}_k is M_k/\rho (=) (kg^k/m^3)/(kg/m^3) = kg^k/kg
+            //    For sections: \hat{S}_k is n_k/\rho (=) (#/m^3)/(kg/m^3) = #/kg
+            //-------------------------------------------------
+
+            if(m_nsoot > 0) {
+                getSdot(x, j);           // Sdot = dn/dt = #/m3*s or #/m3*kg*s for continuous n
+                for (size_t k = 0; k < m_nsoot; k++) {       //dol
+
+                    double convec = rho_u(x,j)*dSdz(x,k,j);
+                    double diffus = 2.0*(m_Sflux(k,j) - m_Sflux(k,j-1)) / (z(j+1) - z(j-1));
+
+                    rsd[index(c_offset_Y + m_nsp + k, j)] = 
+                        (Sdot(k,j) - convec - diffus)/m_rho[j] 
+                        - rdt*(S(x,k,j)-S_prev(k,j));
+
+                    diag[index(c_offset_Y + m_nsp + k, j)] = 1;
+                }
+                // add the soot sources to the gas species
+                for(auto sp : soot::gasSpMapIS) {
+                    int kc = m_thermo->speciesIndex(sp.second);   // cantera mech index
+                    if(kc > 0 && sp.second != "C")
+                        rsd[index(c_offset_Y + kc, j)] += SGdot(sp.first,j)/m_rho[j];
+                }
             }
 
             //-----------------------------------------------
@@ -538,7 +681,8 @@ void StFlow::updateTransport(doublereal* x, size_t j0, size_t j1)
             setGasAtMidpoint(x,j);
             doublereal wtm = m_thermo->meanMolecularWeight();
             doublereal rho = m_thermo->density();
-            m_visc[j] = (m_dovisc ? m_trans->viscosity() : 0.0);
+            //doldb m_visc[j] = (m_dovisc ? m_trans->viscosity() : 0.0);
+            m_visc[j] = m_trans->viscosity();
             m_trans->getMultiDiffCoeffs(m_nsp, &m_multidiff[mindex(0,0,j)]);
 
             // Use m_diff as storage for the factor outside the summation
@@ -554,9 +698,17 @@ void StFlow::updateTransport(doublereal* x, size_t j0, size_t j1)
     } else { // mixture averaged transport
         for (size_t j = j0; j < j1; j++) {
             setGasAtMidpoint(x,j);
-            m_visc[j] = (m_dovisc ? m_trans->viscosity() : 0.0);
+            //doldb m_visc[j] = (m_dovisc ? m_trans->viscosity() : 0.0);
+            m_visc[j] = m_trans->viscosity();
             m_trans->getMixDiffCoeffs(&m_diff[j*m_nsp]);
             m_tcon[j] = m_trans->thermalConductivity();
+        }
+    }
+
+    if(m_nsoot > 0){       //dol
+        for (size_t j = j0; j < j1; j++) {
+            double gradlogT = 2.0*(T(x,j+1)-T(x,j))/((T(x,j+1)+T(x,j)) * (z(j+1)-z(j)));
+            m_vstherm[j] = -0.554*m_visc[j]*gradlogT;
         }
     }
 }
@@ -618,6 +770,15 @@ void StFlow::updateDiffFluxes(const doublereal* x, size_t j0, size_t j1)
             }
         }
     }
+
+    if(m_nsoot > 0) {    //dol
+        for (size_t m = j0; m < j1; m++) {
+            for (size_t k=0; k < m_nsoot; k++) {
+                double s = (m_vstherm[m] > 0.0) ? S(x,k,m) : S(x,k,m+1);   // upwind the soot flux
+                m_Sflux(k,m) = m_vstherm[m]*s;
+            }
+        }
+    }
 }
 
 string StFlow::componentName(size_t n) const
@@ -636,6 +797,8 @@ string StFlow::componentName(size_t n) const
     default:
         if (n >= c_offset_Y && n < (c_offset_Y + m_nsp)) {
             return m_thermo->speciesName(n - c_offset_Y);
+        } else if (n >= c_offset_Y + m_nsp && n < (c_offset_Y + m_nsp + m_nsoot)) { //dol
+                return "soot_var_" + to_string(n-c_offset_Y-m_nsp);
         } else {
             return "<unknown>";
         }
@@ -655,7 +818,8 @@ size_t StFlow::componentIndex(const std::string& name) const
     } else if (name == "eField") {
         return 4;
     } else {
-        for (size_t n=c_offset_Y; n<m_nsp+c_offset_Y; n++) {
+        //dol for (size_t n=c_offset_Y; n<m_nsp+c_offset_Y; n++) {
+        for (size_t n=c_offset_Y; n<m_nsp+c_offset_Y+m_nsoot; n++) { //dol
             if (componentName(n)==name) {
                 return n;
             }
@@ -898,6 +1062,12 @@ void StFlow::evalRightBoundary(double* x, double* rsd, int* diag, double rdt)
     }
     rsd[index(c_offset_Y + rightExcessSpecies(), j)] = 1.0 - sum;
     diag[index(c_offset_Y + rightExcessSpecies(), j)] = 0;
+
+    if(m_nsoot > 0){          //dol
+        for (size_t k = 0; k < m_nsoot; k++)
+            rsd[index(k+c_offset_Y+m_nsp,j)] = m_Sflux(k,j-1) + rho_u(x,j)*S(x,k,j);
+    }
+
     if (domainType() == cAxisymmetricStagnationFlow) {
         rsd[index(c_offset_U,j)] = rho_u(x,j);
         if (m_do_energy[j]) {

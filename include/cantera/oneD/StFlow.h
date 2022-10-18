@@ -12,6 +12,8 @@
 #include "cantera/thermo/IdealGasPhase.h"
 #include "cantera/kinetics/Kinetics.h"
 
+#include "sootModel.h"   //dol
+
 namespace Cantera
 {
 
@@ -49,11 +51,13 @@ public:
     //!     to evaluate all thermodynamic, kinetic, and transport properties.
     //! @param nsp Number of species.
     //! @param points Initial number of grid points
-    StFlow(ThermoPhase* ph = 0, size_t nsp = 1, size_t points = 1);
+    StFlow(ThermoPhase* ph=0, size_t nsp=1, size_t points=1, 
+           size_t nsoot=0, soot::sootModel sootM=soot::sootModel(), soot::state sootS=soot::state()); //dol
 
     //! Delegating constructor
-    StFlow(shared_ptr<ThermoPhase> th, size_t nsp = 1, size_t points = 1) :
-        StFlow(th.get(), nsp, points) {
+    StFlow(shared_ptr<ThermoPhase> th, size_t nsp = 1, size_t points = 1, 
+           size_t nsoot = 0, soot::sootModel sootM=soot::sootModel(), soot::state sootS=soot::state()): //dol
+        StFlow(th.get(), nsp, points, nsoot, sootM, sootS) {     //dol
     }
 
     StFlow(shared_ptr<Solution> sol, size_t nsp = 1, size_t points = 1);
@@ -286,11 +290,20 @@ protected:
         return m_wdot(k,j);
     }
 
+    doublereal Sdot(size_t k, size_t j) const { //dol
+        return m_Sdot(k,j);
+    }
+    doublereal SGdot(size_t k, size_t j) const { //dol
+        return m_SGdot(k,j);
+    }
+
     //! Write the net production rates at point `j` into array `m_wdot`
     void getWdot(doublereal* x, size_t j) {
         setGas(x,j);
         m_kin->getNetProductionRates(&m_wdot(0,j));
     }
+
+    void getSdot(doublereal* x, size_t j);      //dol
 
     //! Update the properties (thermo, transport, and diffusion flux).
     //! This function is called in eval after the points which need
@@ -359,6 +372,19 @@ protected:
         return prevSoln(c_offset_Y + k, j);
     }
 
+    doublereal S(const doublereal* x, size_t k, size_t j) const { //dol
+        return x[index(c_offset_Y + m_nsp + k, j)];
+    }
+
+    // S = Mhat = M/rho or S = nhat = n/rho; M=kg^k/m3; n=#/m3 (or #/(m3*kg) for continuous)
+    doublereal& S(doublereal* x, size_t k, size_t j) { //dol    
+        return x[index(c_offset_Y + m_nsp + k, j)];
+    }
+
+    doublereal S_prev(size_t k, size_t j) const { //dol
+        return prevSoln(c_offset_Y + m_nsp + k, j);
+    }
+
     doublereal X(const doublereal* x, size_t k, size_t j) const {
         return m_wtm[j]*Y(x,k,j)/m_wt[k];
     }
@@ -380,6 +406,11 @@ protected:
     doublereal dYdz(const doublereal* x, size_t k, size_t j) const {
         size_t jloc = (u(x,j) > 0.0 ? j : j + 1);
         return (Y(x,k,jloc) - Y(x,k,jloc-1))/m_dz[jloc-1];
+    }
+
+    doublereal dSdz(const doublereal* x, size_t k, size_t j) const {  //dol
+        size_t jloc = ((u(x,j)+m_vstherm[j]) > 0.0 ? j : j + 1);
+        return (S(x,k,jloc) - S(x,k,jloc-1))/m_dz[jloc-1];
     }
 
     doublereal dTdz(const doublereal* x, size_t j) const {
@@ -431,11 +462,20 @@ protected:
     vector_fp m_multidiff;
     Array2D m_dthermal;
     Array2D m_flux;
+    Array2D m_Sflux;         //dol
+
+    vector_fp m_vstherm;     //dol thermophortic velocity * rho
 
     // production rates
     Array2D m_wdot;
 
+    Array2D m_Sdot;          //dol
+    Array2D m_SGdot;          //dol
+
     size_t m_nsp;
+
+    size_t m_nsoot;          //dol
+    bool   m_dosoot;         //dol
 
     IdealGasPhase* m_thermo;
     Kinetics* m_kin;
@@ -489,6 +529,9 @@ public:
 
     //! Temperature at the point used to fix the flame location
     double m_tfixed;
+
+    soot::sootModel m_sootModel;    //dol
+    soot::state     m_sootState;    //dol
 
 private:
     vector_fp m_ybar;

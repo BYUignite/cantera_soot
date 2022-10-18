@@ -2101,6 +2101,22 @@ if env["system_yamlcpp"]:
 if env["blas_lapack_libs"]:
     env["external_libs"].extend(env["blas_lapack_libs"])
 
+
+
+
+
+
+
+#dol
+env["external_libs"].append("sootModel")
+
+
+
+
+
+
+
+
 # List of static libraries needed to link to Cantera
 env["cantera_libs"] = ["cantera"] + env["external_libs"]
 
