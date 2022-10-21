@@ -60,7 +60,12 @@ public:
         StFlow(th.get(), nsp, points, nsoot, sootM, sootS) {     //dol
     }
 
-    StFlow(shared_ptr<Solution> sol, size_t nsp = 1, size_t points = 1);
+
+
+    StFlow(shared_ptr<Solution> sol, size_t nsp=1, size_t points=1,
+           size_t nsoot=0, soot::sootModel sootM=soot::sootModel(), soot::state sootS=soot::state()); //dol
+
+
 
     //! @name Problem Specification
     //! @{
