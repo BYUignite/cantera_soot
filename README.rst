@@ -4,6 +4,16 @@
 
 |doi| |codecov| |ci| |release|
 
+BYUignite version
+================
+* This is a forked version of Cantera that is modified to include soot formation in premixed flames.
+* Primary changes are to StFlow.h and StFlow.cpp though some comments are made to other files. Search "//dol"
+* Compiles against repository sootlib, and test with repository premixed_burner.
+    * See one line change to SConstruct (search "#dol" line 2110)
+    * See also cantera.conf
+    * Compilation here is setup for use with a system (external to Cantera) installion of Sundials.
+    * Run and tested on an M1 mac running Monterey
+
 
 What is Cantera?
 ================
