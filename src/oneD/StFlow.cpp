@@ -17,7 +17,7 @@ namespace Cantera
 {
 
 StFlow::StFlow(ThermoPhase* ph, size_t nsp, size_t points, 
-               size_t nsoot, soot::sootModel sootM, soot::state sootS) : //dol
+               size_t nsoot, soot::sootModel *sootM, soot::state sootS) : //dol
     Domain1D(nsp+c_offset_Y+nsoot, points),                              //dol
     m_press(-1.0),
     m_nsp(nsp),
@@ -124,7 +124,7 @@ StFlow::StFlow(ThermoPhase* ph, size_t nsp, size_t points,
 }
 
 StFlow::StFlow(std::shared_ptr<Solution> sol, size_t nsp, size_t points,
-               size_t nsoot, soot::sootModel sootM, soot::state sootS) : //dol
+               size_t nsoot, soot::sootModel *sootM, soot::state sootS) : //dol
     StFlow(sol->thermo().get(), nsp, points, nsoot, sootM, sootS) {
 
     m_solution = sol;
@@ -433,15 +433,19 @@ void StFlow::getSdot(doublereal *x, size_t j) {     //dol
 
     //----------- soot source terms
 
-    m_sootModel.setSourceTerms(m_sootState);
+    vector<double> sootSources(m_nsoot, 0.0);
+    vector<double> gasSources((size_t)soot::gasSp::size, 0.0);
+    vector<double> pahSources((size_t)soot::pahSp::size, 0.0);
+
+    m_sootModel->getSourceTerms(m_sootState, sootSources, gasSources, pahSources);
 
     //----------- set cantera soot sources using soot model
 
     for(size_t k=0; k<m_nsoot; k++)
-        m_Sdot(k,j) = m_sootModel.sourceTerms->sootSourceTerms[k] / m_sootState.sootScales[k];
+        m_Sdot(k,j) = sootSources[k]/ m_sootState.sootScales[k];
 
     for(size_t k=0; k<(int)soot::gasSp::size; k++)
-        m_SGdot(k,j) = m_sootModel.sourceTerms->gasSourceTerms[k];
+        m_SGdot(k,j) = gasSources[k];
 
 }
 

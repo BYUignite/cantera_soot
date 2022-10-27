@@ -12,7 +12,7 @@
 #include "cantera/thermo/IdealGasPhase.h"
 #include "cantera/kinetics/Kinetics.h"
 
-#include "sootModel.h"   //dol
+#include "sootHeaders.h"   //dol
 
 namespace Cantera
 {
@@ -52,18 +52,18 @@ public:
     //! @param nsp Number of species.
     //! @param points Initial number of grid points
     StFlow(ThermoPhase* ph=0, size_t nsp=1, size_t points=1, 
-           size_t nsoot=0, soot::sootModel sootM=soot::sootModel(), soot::state sootS=soot::state()); //dol
+           size_t nsoot=0, soot::sootModel *sootM=0, soot::state sootS=soot::state()); //dol
 
     //! Delegating constructor
     StFlow(shared_ptr<ThermoPhase> th, size_t nsp = 1, size_t points = 1, 
-           size_t nsoot = 0, soot::sootModel sootM=soot::sootModel(), soot::state sootS=soot::state()): //dol
+           size_t nsoot = 0, soot::sootModel *sootM=0, soot::state sootS=soot::state()): //dol
         StFlow(th.get(), nsp, points, nsoot, sootM, sootS) {     //dol
     }
 
 
 
     StFlow(shared_ptr<Solution> sol, size_t nsp=1, size_t points=1,
-           size_t nsoot=0, soot::sootModel sootM=soot::sootModel(), soot::state sootS=soot::state()); //dol
+           size_t nsoot=0, soot::sootModel *sootM=0, soot::state sootS=soot::state()); //dol
 
 
 
@@ -535,8 +535,8 @@ public:
     //! Temperature at the point used to fix the flame location
     double m_tfixed;
 
-    soot::sootModel m_sootModel;    //dol
-    soot::state     m_sootState;    //dol
+    soot::sootModel *m_sootModel;    //dol
+    soot::state      m_sootState;    //dol
 
 private:
     vector_fp m_ybar;
