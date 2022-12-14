@@ -433,19 +433,15 @@ void StFlow::getSdot(doublereal *x, size_t j) {     //dol
 
     //----------- soot source terms
 
-    vector<double> sootSources(m_nsoot, 0.0);
-    vector<double> gasSources((size_t)soot::gasSp::size, 0.0);
-    vector<double> pahSources((size_t)soot::pahSp::size, 0.0);
-
-    m_sootModel->getSourceTerms(m_sootState, sootSources, gasSources, pahSources);
+    m_sootModel->setSourceTerms(m_sootState);
 
     //----------- set cantera soot sources using soot model
 
     for(size_t k=0; k<m_nsoot; k++)
-        m_Sdot(k,j) = sootSources[k]/ m_sootState.sootScales[k];
+        m_Sdot(k,j) = m_sootModel->sources.sootSources[k]/ m_sootState.sootScales[k];
 
     for(size_t k=0; k<(int)soot::gasSp::size; k++)
-        m_SGdot(k,j) = gasSources[k];
+        m_SGdot(k,j) = m_sootModel->sources.gasSources[k];
 
 }
 
